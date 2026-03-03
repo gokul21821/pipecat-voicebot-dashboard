@@ -136,8 +136,8 @@ export function useVoiceCall() {
       document.body.appendChild(audioEl);
       remoteAudioRef.current = audioEl;
 
-      callFrame.on("track-started", (event: { participant: { local: boolean }; track: MediaStreamTrack }) => {
-        if (event.participant?.local) return;
+      callFrame.on("track-started", (event: { participant?: { local: boolean } | null; track?: MediaStreamTrack }) => {
+        if (!event.participant || event.participant.local) return;
         if (event.track?.kind === "audio" && remoteAudioRef.current) {
           attachRemoteTrackToAudio(event.track, remoteAudioRef.current);
         }
