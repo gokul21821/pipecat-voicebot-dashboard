@@ -1,14 +1,10 @@
 import type { NextConfig } from "next";
 
+// /start and /api/start are now handled by the Route Handler at
+// app/api/start/route.ts, which injects the BROKER_AUTH_SECRET server-side.
+// The rewrites have been removed so the secret is never exposed to the browser.
 const nextConfig: NextConfig = {
   reactStrictMode: false,
-  async rewrites() {
-    const broker = process.env.SESSION_BROKER_URL || "http://localhost:3000";
-    return [
-      { source: "/start", destination: `${broker}/start` },
-      { source: "/api/start", destination: `${broker}/api/start` },
-    ];
-  },
 };
 
 export default nextConfig;
