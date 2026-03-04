@@ -83,6 +83,7 @@ export function useVoiceCall() {
 
   const startCall = useCallback(async () => {
     updateState({ status: "requesting", errorMessage: null });
+    console.log("[VoiceCall] Requesting session from /start...");
 
     try {
       // Dynamically import daily-js to avoid SSR issues
@@ -92,6 +93,7 @@ export function useVoiceCall() {
       // before creating a new one to avoid "duplicate dailyiframe instances not allowed".
       const existingCall = DailyIframe.getCallInstance?.() ?? callFrameRef.current;
       if (existingCall && !existingCall.isDestroyed?.()) {
+        console.log("[VoiceCall] Cleaning up existing call before starting new one");
         try {
           await existingCall.leave?.();
           await existingCall.destroy?.();
@@ -109,17 +111,33 @@ export function useVoiceCall() {
       const res = await fetch("/start", { method: "POST" });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: "Unknown error" }));
+        console.error("[VoiceCall] Session request failed:", res.status, err);
         throw new Error(err.error || `HTTP ${res.status}`);
       }
       const data = await res.json();
       // Session-broker normalises dailyRoom→url, dailyToken→token; support both
       const url = data.url ?? data.dailyRoom;
       const token = data.token ?? data.dailyToken;
+
+      // Log transport type: Daily room vs SmallWebRTC/other (for debugging)
+      const isDailyRoom = typeof url === "string" && url.includes("daily.co");
+      const transportType = isDailyRoom ? "Daily" : "SmallWebRTC/other";
+      console.log("[VoiceCall] Session response:", {
+        hasUrl: !!url,
+        urlPreview: url ? `${String(url).slice(0, 50)}...` : null,
+        hasToken: !!token,
+        sessionId: data.sessionId ?? null,
+        transportType,
+        rawKeys: Object.keys(data),
+      });
+
       if (!url || !token) {
+        console.error("[VoiceCall] Invalid session: missing url or token. Response keys:", Object.keys(data));
         throw new Error("Invalid session response from broker");
       }
 
       updateState({ status: "connecting", sessionId: data.sessionId ?? null });
+      console.log("[VoiceCall] Joining with", transportType, "transport...");
 
       const callFrame = DailyIframe.createCallObject({
         audioSource: true,
@@ -139,11 +157,13 @@ export function useVoiceCall() {
       callFrame.on("track-started", (event: { participant?: { local: boolean } | null; track?: MediaStreamTrack }) => {
         if (!event.participant || event.participant.local) return;
         if (event.track?.kind === "audio" && remoteAudioRef.current) {
+          console.log("[VoiceCall] Remote audio track started, attaching to playback");
           attachRemoteTrackToAudio(event.track, remoteAudioRef.current);
         }
       });
 
       callFrame.on("joined-meeting", () => {
+        console.log("[VoiceCall] Joined meeting successfully");
         updateState({ status: "connected" });
         startTimer();
         // Ensure local mic is published so the bot receives user audio
@@ -159,6 +179,7 @@ export function useVoiceCall() {
             },
             "*"
           );
+          console.log("[VoiceCall] Sent RTVI client-ready");
         } catch {
           // Non-fatal; bot may greet immediately if no client-ready
         }
@@ -174,6 +195,7 @@ export function useVoiceCall() {
 
       callFrame.on("participant-joined", (event: { participant: { local: boolean } }) => {
         if (!event.participant.local) {
+          console.log("[VoiceCall] Bot/agent joined");
           setState((prev) => ({
             ...prev,
             agentJoined: true,
@@ -184,6 +206,7 @@ export function useVoiceCall() {
 
       callFrame.on("participant-left", (event: { participant: { local: boolean } }) => {
         if (!event.participant.local) {
+          console.log("[VoiceCall] Bot/agent left");
           setState((prev) => ({
             ...prev,
             agentJoined: false,
@@ -193,6 +216,7 @@ export function useVoiceCall() {
       });
 
       callFrame.on("left-meeting", () => {
+        console.log("[VoiceCall] Left meeting");
         updateState({
           status: "idle",
           agentJoined: false,
@@ -213,6 +237,7 @@ export function useVoiceCall() {
       });
 
       callFrame.on("error", (event: { error?: { message?: string } }) => {
+        console.error("[VoiceCall] Call error:", event?.error?.message ?? event);
         updateState({
           status: "error",
           errorMessage: event?.error?.message || "Call error",
@@ -270,9 +295,11 @@ export function useVoiceCall() {
         });
       });
 
+      console.log("[VoiceCall] Calling join() with url and token...");
       await callFrame.join({ url, token });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to start call";
+      console.error("[VoiceCall] startCall failed:", err);
       updateState({ status: "error", errorMessage: msg });
     }
   }, [startTimer, stopTimer]);
@@ -281,6 +308,7 @@ export function useVoiceCall() {
     const callFrame = callFrameRef.current;
     if (!callFrame) return;
 
+    console.log("[VoiceCall] Ending call...");
     updateState({ status: "disconnecting" });
     stopTimer();
 
